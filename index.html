@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMPN 2 Tanah Abang - Sistem Pelanggaran Siswa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            box-sizing: border-box;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .notification.show {
+            transform: translateX(0);
+        }
+        .export-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .db-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .db-online {
+            background: #10b981;
+            color: white;
+        }
+        .db-offline {
+            background: #ef4444;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <!-- Database Status -->
+    <div id="dbStatus" class="db-status db-offline">
+        🔴 Database Offline
+    </div>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="export-modal hidden">
+        <div class="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-gray-800">📊 Data Export</h3>
+                <button id="closeModal" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            <div class="bg-gray-50 p-4 rounded-lg">
+                <p class="text-sm text-gray-600 mb-4">Copy data di bawah ini dan paste ke Excel/Google Sheets:</p>
+                <textarea id="exportData" class="w-full h-64 p-3 border border-gray-300 rounded-lg text-xs font-mono" readonly></textarea>
+                <div class="mt-4 flex space-x-2">
+                    <button id="copyData" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                        📋 Copy Data
+                    </button>
+                    <button id="selectAll" class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+                        ✅ Select All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg">
+        <div class="flex items-center space-x-2">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+            </svg>
+            <span id="notificationText">Data berhasil disimpan!</span>
+        </div>
+    </div>
+
+    <!-- Login Page -->
+    <div id="loginPage" class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in">
+            <!-- Logo Sekolah -->
+            <div class="text-center mb-8">
+                <div class="w-24 h-24 mx-auto mb-4 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-full flex items-center justify-center">
+                    <svg class="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-800 mb-2">SMPN 2 Tanah Abang</h1>
+                <p class="text-gray-600">Sistem Catatan Pelanggaran Siswa</p>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                    <input type="text" id="username" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" placeholder="Masukkan username" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                    <input type="password" id="password" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" placeholder="Masukkan password" required>
+                </div>
+                <button type="submit" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all transform hover:scale-105">
+                    Masuk
+                </button>
+            </form>
+
+            <div id="loginError" class="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden">
+                Username atau password salah!
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="mainApp" class="hidden min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-lg border-b-4 border-blue-600">
+            <div class="max-w-7xl mx-auto px-4 py-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-full flex items-center justify-center">
+                            <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-bold text-gray-800">SMPN 2 Tanah Abang</h1>
+                            <p class="text-sm text-gray-600">Sistem Pelanggaran Siswa</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <span id="userInfo" class="text-sm text-gray-600 block"></span>
+                            <span id="lastSync" class="text-xs text-gray-500"></span>
+                        </div>
+                        <button id="logoutBtn" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors">
+                            Keluar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto p-6">
+            <div class="bg-white rounded-2xl shadow-xl p-8 fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-8 text-center">Input Pelanggaran Siswa</h2>
+                
+                <!-- Form Input Pelanggaran -->
+                <form id="violationForm" class="space-y-6">
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <!-- Kelas -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Kelas</label>
+                            <select id="studentClass" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
+                                <option value="">Pilih Kelas</option>
+                                <option value="7.1">7.1</option>
+                                <option value="7.2">7.2</option>
+                                <option value="7.3">7.3</option>
+                                <option value="8.1">8.1</option>
+                                <option value="8.2">8.2</option>
+                                <option value="8.3">8.3</option>
+                                <option value="9.1">9.1</option>
+                                <option value="9.2">9.2</option>
+                                <option value="9.3">9.3</option>
+                            </select>
+                        </div>
+
+                        <!-- Nama Siswa -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Nama Siswa</label>
+                            <input type="text" id="studentName" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Masukkan nama siswa" required>
+                        </div>
+                    </div>
+
+                    <!-- Jenis Pelanggaran -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Jenis Pelanggaran</label>
+                        <select id="violationType" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
+                            <option value="">Pilih Jenis Pelanggaran</option>
+                            <optgroup label="Klasifikasi A (100 Poin)">
+                                <option value="A1-100">Berbuat zina</option>
+                                <option value="A2-100">Terlibat masalah narkoba baik sebagai pemakai maupun pengedar</option>
+                                <option value="A3-100">Berkelahi dengan senjata tajam dan melukai orang lain</option>
+                                <option value="A4-100">Berurusan dengan pihak berwajib karena kejahatan</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi B (50 Poin)">
+                                <option value="B1-50">Terlibat masalah miras baik sebagai pemakai maupun pengedar</option>
+                                <option value="B2-50">Membawa senjata tajam yang tidak ada hubunganya dengan proses belajar mengajar</option>
+                                <option value="B3-50">Memalsukan tanda tangan Kepala Sekolah, Wali Kelas, Guru, dan Pegawai sekolah</option>
+                                <option value="B4-50">Mengubah, merusak, memalsukan raport atau dokumen penting lainnya</option>
+                                <option value="B5-50">Melakukan ancaman jiwa terhadap seseorang baik berupa perkataan maupun tindakan fisik</option>
+                                <option value="B6-50">Mengikuti/menjadi anggota organisasi terlarang</option>
+                                <option value="B7-50">Melakukan tindakan pelecehan seksual terhadap orang lain</option>
+                                <option value="B8-50">Menentang (bersikap bermusuhan), bersikap tidak sopan terhadap kepala sekolah, guru dan pegawai</option>
+                                <option value="B9-50">Melakukan perundungan (bullying) baik secara verbal atau non verbal</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi B (35 Poin)">
+                                <option value="B10-35">Merusak sarana dan prasarana sekolah</option>
+                                <option value="B11-35">Membawa hp ke sekolah tanpa izin guru dan menyalahgunakannya</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi B (30 Poin)">
+                                <option value="B12-30">Membawa dan atau merokok di lingkungan sekolah atau di luar sekolah saat menggunakan seragam sekolah</option>
+                                <option value="B13-30">Memalsukan surat izin dan atau tanda tangan orang tua/wali</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi C (25 Poin)">
+                                <option value="C1-25">Mengunggah, mengunduh, dan mengedarkan konten porno, pelecehan SARA, dan tindak kekerasan</option>
+                                <option value="C2-25">Membawa/menyebarluaskan selebaran yang dapat menimbulkan keresahan</option>
+                                <option value="C3-25">Membawa dan atau mengedarkan foto, Video porno</option>
+                                <option value="C4-25">Memajang foto pribadi (selfie) di media sosial yang mengandung konten pornografi</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi D (20 Poin)">
+                                <option value="D1-20">Melakukan perjudian di sekolah</option>
+                                <option value="D2-20">Melakukan tindak kekerasan fisik baik di sekolah maupun di luar sekolah</option>
+                                <option value="D3-20">Melakukan suatu tindakan yang dapat merusak nama baik sekolah</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi D (15 Poin)">
+                                <option value="D4-15">Melindungi teman yang berbuat salah</option>
+                                <option value="D5-15">Membuat pernyataan palsu</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi D (10 Poin)">
+                                <option value="D6-10">Mengotori dan mencoret dinding bangunan, pintu, meja, serta kursi yang tak semestinya</option>
+                                <option value="D7-10">Tidak mengikuti upacara atau kegiatan lain tanpa izin atau alasan yang jelas</option>
+                                <option value="D8-10">Tidak memenuhi panggilan menhadap pihak sekolah</option>
+                                <option value="D9-10">Membolos atau meninggalkan sekolah sebelum kegiatan usai tanpa izin</option>
+                                <option value="D10-10">Bergaul dengan lawan jenis secara berlebihan</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi E (7 Poin)">
+                                <option value="E1-7">Membawa/memakai make-up</option>
+                                <option value="E2-7">Tidak mengikuti sholat dzuhur berjamaah</option>
+                                <option value="E3-7">Bermain bola dan gitar pada jam pelajaran</option>
+                                <option value="E4-7">Berada di kantin, toko, perpustakaan, UKS, saat jam pelajaran berlangsung tanpa izin</option>
+                                <option value="E5-7">Tidak mengikuti kegiatan Pramuka</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi E (5 Poin)">
+                                <option value="E6-5">Melakukan tindakan kecurangan saat ulangan/ujian</option>
+                                <option value="E7-5">Memakai jaket di lingkungan sekolah</option>
+                                <option value="E8-5">Tidak memakai seragam sekolah sesuai ketentuan</option>
+                                <option value="E9-5">Membuka jilbab secara sengaja, kecuali sedang mengambil air wudhu</option>
+                                <option value="E10-5">Tidak masuk sekolah tanpa keterangan</option>
+                                <option value="E11-5">Memakai tato, gambar pada tubuh, dan hena</option>
+                                <option value="E12-5">Tidak melaksanakan piket di sekolah tanpa izin</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi E (3 Poin)">
+                                <option value="E13-3">Memakai aksesoris gelang, kalung, anting-anting, cincin (bagi pria)</option>
+                                <option value="E14-3">Memakai perhiasan berlebihan</option>
+                                <option value="E15-3">Rambut gondrong</option>
+                                <option value="E16-3">Kuku panjang dan memakai pewarna kuku (kuteks)</option>
+                                <option value="E17-3">Tidak mengumpulkan tugas</option>
+                                <option value="E18-3">Membuang sampah tidak pada tempat yang telah disediakan</option>
+                                <option value="E19-3">Tidak membawa kitab suci Al-quran untuk dibaca setiap hari belajar</option>
+                            </optgroup>
+                            <optgroup label="Klasifikasi E (2 Poin)">
+                                <option value="E20-2">Tidak memakai atribut sekolah sesuai ketentuan</option>
+                                <option value="E21-2">Terlambat datang ke sekolah setelah gerbang ditutup</option>
+                                <option value="E22-2">Makan di kelas, perpustakaan, dan laboratorium pada saat pelajaran berlangsung</option>
+                                <option value="E23-2">Berbicara kotor atau tidak sopan/tak senonoh terhadap orang lain</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <!-- Keterangan -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Keterangan Tambahan</label>
+                        <textarea id="description" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" rows="3" placeholder="Keterangan tambahan (opsional)"></textarea>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all transform hover:scale-105 flex items-center justify-center">
+                        <span id="submitText">Simpan Pelanggaran</span>
+                        <div id="submitLoading" class="loading ml-2 hidden"></div>
+                    </button>
+                </form>
+
+                <!-- Success Message -->
+                <div id="successMessage" class="mt-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg hidden">
+                    Data pelanggaran berhasil disimpan!
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <div class="mt-8 bg-white rounded-2xl shadow-xl">
+                <div class="border-b border-gray-200">
+                    <nav class="flex space-x-8 px-8 pt-6">
+                        <button id="dailyTab" class="py-2 px-1 border-b-2 border-blue-500 font-medium text-sm text-blue-600">
+                            Riwayat Harian
+                        </button>
+                        <button id="weeklyTab" class="py-2 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                            Rekap Mingguan
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Daily History -->
+                <div id="dailyContent" class="p-8">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-bold text-gray-800">Riwayat Pelanggaran Hari Ini</h3>
+                        <div class="flex space-x-2">
+                            <button id="exportDaily" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                                </svg>
+                                <span>Export Hari Ini</span>
+                            </button>
+                            <button id="syncBtn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/>
+                                </svg>
+                                <span id="syncText">Sync Data</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Daily Stats -->
+                    <div class="grid md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div class="text-blue-600 text-sm font-medium">Total Pelanggaran Hari Ini</div>
+                            <div id="dailyTotal" class="text-2xl font-bold text-blue-700">0</div>
+                        </div>
+                        <div class="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                            <div class="text-orange-600 text-sm font-medium">Total Poin Hari Ini</div>
+                            <div id="dailyPoints" class="text-2xl font-bold text-orange-700">0</div>
+                        </div>
+                        <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                            <div class="text-purple-600 text-sm font-medium">Siswa Terlibat Hari Ini</div>
+                            <div id="dailyStudents" class="text-2xl font-bold text-purple-700">0</div>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Waktu</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Kelas</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Nama Siswa</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Pelanggaran</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Poin</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Guru</th>
+                                </tr>
+                            </thead>
+                            <tbody id="violationHistory" class="divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                                        <div class="loading mx-auto mb-2"></div>
+                                        Memuat data...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Weekly Summary -->
+                <div id="weeklyContent" class="p-8 hidden">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-bold text-gray-800">Rekap Pelanggaran Mingguan</h3>
+                        <div id="adminControls" class="hidden">
+                            <button id="downloadExcel" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                                </svg>
+                                <span>Download Excel</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Week Selection -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Pilih Minggu</label>
+                        <input type="week" id="weekSelector" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+
+                    <!-- Summary Cards -->
+                    <div class="grid md:grid-cols-4 gap-4 mb-8">
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <div class="text-red-600 text-sm font-medium">Total Pelanggaran</div>
+                            <div id="totalViolations" class="text-2xl font-bold text-red-700">0</div>
+                        </div>
+                        <div class="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                            <div class="text-orange-600 text-sm font-medium">Total Poin</div>
+                            <div id="totalPoints" class="text-2xl font-bold text-orange-700">0</div>
+                        </div>
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                            <div class="text-yellow-600 text-sm font-medium">Siswa Terlibat</div>
+                            <div id="totalStudents" class="text-2xl font-bold text-yellow-700">0</div>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div class="text-blue-600 text-sm font-medium">Kelas Terlibat</div>
+                            <div id="totalClasses" class="text-2xl font-bold text-blue-700">0</div>
+                        </div>
+                    </div>
+
+                    <!-- Weekly Table -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Nama Siswa</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Kelas</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Total Pelanggaran</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Total Poin</th>
+                                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="weeklySummary" class="divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="5" class="px-4 py-8 text-center text-gray-500">Pilih minggu untuk melihat rekap</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // ⚠️ GANTI DENGAN SUPABASE CREDENTIALS ANDA
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL_HERE';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE';
+
+        // Initialize Supabase client
+        let supabase = null;
+        let isSupabaseConnected = false;
+
+        // Initialize Supabase connection
+        function initSupabase() {
+            try {
+                if (SUPABASE_URL !== 'YOUR_SUPABASE_URL_HERE' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY_HERE') {
+                    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                    testConnection();
+                } else {
+                    console.log('Supabase credentials not configured, using localStorage only');
+                    updateDbStatus(false);
+                }
+            } catch (error) {
+                console.error('Failed to initialize Supabase:', error);
+                updateDbStatus(false);
+            }
+        }
+
+        // Test database connection
+        async function testConnection() {
+            try {
+                const { data, error } = await supabase.from('violations').select('count', { count: 'exact', head: true });
+                if (error) throw error;
+                isSupabaseConnected = true;
+                updateDbStatus(true);
+                console.log('✅ Database connected successfully');
+            } catch (error) {
+                console.error('❌ Database connection failed:', error);
+                isSupabaseConnected = false;
+                updateDbStatus(false);
+            }
+        }
+
+        // Update database status indicator
+        function updateDbStatus(connected) {
+            const statusEl = document.getElementById('dbStatus');
+            if (connected) {
+                statusEl.className = 'db-status db-online';
+                statusEl.innerHTML = '🟢 Database Online';
+            } else {
+                statusEl.className = 'db-status db-offline';
+                statusEl.innerHTML = '🔴 Database Offline';
+            }
+        }
+
+        // User credentials
+        const users = {
+            'admin': { password: 'admin123', role: 'admin', name: 'Administrator' },
+            'nurnawawi': { password: 'guru123', role: 'guru', name: 'Nurnawawi' },
+            'iin': { password: 'guru123', role: 'guru', name: 'Iin' },
+            'efdi': { password: 'guru123', role: 'guru', name: 'Efdi' },
+            'selvi': { password: 'guru123', role: 'guru', name: 'Selvi' },
+            'meli': { password: 'guru123', role: 'guru', name: 'Meli' },
+            'komisa': { password: 'guru123', role: 'guru', name: 'Komisa' },
+            'esi': { password: 'guru123', role: 'guru', name: 'Esi' },
+            'lilia': { password: 'guru123', role: 'guru', name: 'Lilia' },
+            'handayani': { password: 'guru123', role: 'guru', name: 'Handayani' },
+            'suseno': { password: 'guru123', role: 'guru', name: 'Suseno' },
+            'adenora': { password: 'guru123', role: 'guru', name: 'Adenora' },
+            'hajri': { password: 'guru123', role: 'guru', name: 'Hajri' },
+            'nopitayanti': { password: 'guru123', role: 'guru', name: 'Nopitayanti' },
+            'indah': { password: 'guru123', role: 'guru', name: 'Indah' },
+            'karlina': { password: 'guru123', role: 'guru', name: 'Karlina' },
+            'putri': { password: 'guru123', role: 'guru', name: 'Putri' },
+            'arispan': { password: 'guru123', role: 'guru', name: 'Arispan' },
+            'desi': { password: 'guru123', role: 'guru', name: 'Desi' },
+            'ranti': { password: 'guru123', role: 'guru', name: 'Ranti' }
+        };
+
+        let currentUser = null;
+        let violations = [];
+
+        // Show notification
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            const notificationText = document.getElementById('notificationText');
+            
+            notificationText.textContent = message;
+            notification.className = `notification ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-3 rounded-lg shadow-lg show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Show export modal
+        function showExportModal(csvContent, title) {
+            const modal = document.getElementById('exportModal');
+            const textarea = document.getElementById('exportData');
+            
+            textarea.value = csvContent;
+            modal.classList.remove('hidden');
+            
+            showNotification(`${title} siap di-copy! Paste ke Excel/Google Sheets`);
+        }
+
+        // Close modal
+        document.getElementById('closeModal').addEventListener('click', function() {
+            document.getElementById('exportModal').classList.add('hidden');
+        });
+
+        // Copy data
+        document.getElementById('copyData').addEventListener('click', function() {
+            const textarea = document.getElementById('exportData');
+            textarea.select();
+            document.execCommand('copy');
+            showNotification('Data berhasil di-copy! Paste ke Excel/Google Sheets');
+        });
+
+        // Select all
+        document.getElementById('selectAll').addEventListener('click', function() {
+            const textarea = document.getElementById('exportData');
+            textarea.select();
+        });
+
+        // Save violation to database
+        async function saveViolation(violation) {
+            // Always save to localStorage as backup
+            const localViolations = JSON.parse(localStorage.getItem('violations') || '[]');
+            localViolations.push(violation);
+            localStorage.setItem('violations', JSON.stringify(localViolations));
+
+            // Try to save to Supabase if connected
+            if (isSupabaseConnected && supabase) {
+                try {
+                    const { data, error } = await supabase
+                        .from('violations')
+                        .insert([{
+                            student_class: violation.studentClass,
+                            student_name: violation.studentName,
+                            violation_type: violation.violationType,
+                            points: violation.points,
+                            description: violation.description || null,
+                            teacher: violation.teacher
+                        }]);
+
+                    if (error) throw error;
+                    
+                    // Update last sync time
+                    const now = new Date().toLocaleString('id-ID');
+                    document.getElementById('lastSync').textContent = `Sync: ${now}`;
+                    
+                    return { success: true, source: 'database' };
+                } catch (error) {
+                    console.error('Failed to save to database:', error);
+                    return { success: true, source: 'local', error };
+                }
+            }
+            
+            return { success: true, source: 'local' };
+        }
+
+        // Load violations from database
+        async function loadViolations() {
+            let allViolations = [];
+
+            // Load from localStorage first
+            const localViolations = JSON.parse(localStorage.getItem('violations') || '[]');
+            
+            // Try to load from Supabase if connected
+            if (isSupabaseConnected && supabase) {
+                try {
+                    const { data, error } = await supabase
+                        .from('violations')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+
+                    if (error) throw error;
+
+                    // Convert Supabase data to our format
+                    const dbViolations = data.map(v => ({
+                        id: v.id,
+                        timestamp: new Date(v.created_at).toLocaleString('id-ID'),
+                        studentClass: v.student_class,
+                        studentName: v.student_name,
+                        violationType: v.violation_type,
+                        points: v.points,
+                        description: v.description,
+                        teacher: v.teacher,
+                        date: new Date(v.created_at).toDateString()
+                    }));
+
+                    allViolations = dbViolations;
+                    
+                    // Update last sync time
+                    const now = new Date().toLocaleString('id-ID');
+                    document.getElementById('lastSync').textContent = `Sync: ${now}`;
+                    
+                } catch (error) {
+                    console.error('Failed to load from database:', error);
+                    allViolations = localViolations;
+                }
+            } else {
+                allViolations = localViolations;
+            }
+
+            violations = allViolations;
+            updateViolationHistory();
+            updateDailyStats();
+        }
+
+        // Sync data manually
+        async function syncData() {
+            const syncBtn = document.getElementById('syncBtn');
+            const syncText = document.getElementById('syncText');
+            
+            syncText.textContent = 'Syncing...';
+            syncBtn.disabled = true;
+            
+            try {
+                await loadViolations();
+                showNotification('Data berhasil di-sync!');
+                syncText.textContent = 'Sync Data';
+            } catch (error) {
+                showNotification('Gagal sync data', 'error');
+                syncText.textContent = 'Sync Data';
+            } finally {
+                syncBtn.disabled = false;
+            }
+        }
+
+        // Export daily data
+        function exportDailyData() {
+            const today = new Date().toDateString();
+            const todayViolations = violations.filter(v => v.date === today);
+            
+            if (todayViolations.length === 0) {
+                showNotification('Tidak ada data pelanggaran hari ini untuk di-export', 'error');
+                return;
+            }
+
+            const dateStr = new Date().toLocaleDateString('id-ID').replace(/\//g, '-');
+            let csvContent = `LAPORAN PELANGGARAN HARIAN - ${dateStr}\n`;
+            csvContent += `Sekolah: SMPN 2 Tanah Abang\n`;
+            csvContent += `Tanggal: ${new Date().toLocaleDateString('id-ID')}\n\n`;
+            
+            csvContent += 'Waktu,Kelas,Nama Siswa,Jenis Pelanggaran,Poin,Guru,Keterangan\n';
+            
+            todayViolations.forEach(v => {
+                const time = new Date(v.timestamp).toLocaleTimeString('id-ID');
+                csvContent += `"${time}","${v.studentClass}","${v.studentName}","${v.violationType}","${v.points}","${v.teacher}","${v.description || '-'}"\n`;
+            });
+
+            // Add summary
+            const totalPoints = todayViolations.reduce((sum, v) => sum + v.points, 0);
+            const uniqueStudents = [...new Set(todayViolations.map(v => `${v.studentName}-${v.studentClass}`))];
+            
+            csvContent += '\n\nRINGKASAN HARIAN\n';
+            csvContent += `Total Pelanggaran,${todayViolations.length}\n`;
+            csvContent += `Total Poin,${totalPoints}\n`;
+            csvContent += `Siswa Terlibat,${uniqueStudents.length}\n`;
+
+            showExportModal(csvContent, 'Data Harian');
+        }
+
+        // Update daily statistics
+        function updateDailyStats() {
+            const today = new Date().toDateString();
+            const todayViolations = violations.filter(v => v.date === today);
+            
+            const totalViolations = todayViolations.length;
+            const totalPoints = todayViolations.reduce((sum, v) => sum + v.points, 0);
+            const uniqueStudents = [...new Set(todayViolations.map(v => `${v.studentName}-${v.studentClass}`))];
+            
+            document.getElementById('dailyTotal').textContent = totalViolations;
+            document.getElementById('dailyPoints').textContent = totalPoints;
+            document.getElementById('dailyStudents').textContent = uniqueStudents.length;
+        }
+
+        // Login functionality
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('loginError');
+            
+            if (users[username] && users[username].password === password) {
+                currentUser = { username, ...users[username] };
+                document.getElementById('loginPage').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                document.getElementById('userInfo').textContent = `${currentUser.role === 'admin' ? 'Admin' : 'Guru'}: ${currentUser.name}`;
+                errorDiv.classList.add('hidden');
+                
+                // Show admin controls if admin
+                if (currentUser.role === 'admin') {
+                    document.getElementById('adminControls').classList.remove('hidden');
+                }
+                
+                // Set current week
+                const now = new Date();
+                const weekSelector = document.getElementById('weekSelector');
+                weekSelector.value = getWeekString(now);
+                
+                // Load data
+                loadViolations();
+            } else {
+                errorDiv.classList.remove('hidden');
+            }
+        });
+
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', function() {
+            currentUser = null;
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('mainApp').classList.add('hidden');
+            document.getElementById('loginForm').reset();
+        });
+
+        // Event listeners
+        document.getElementById('exportDaily').addEventListener('click', exportDailyData);
+        document.getElementById('syncBtn').addEventListener('click', syncData);
+
+        // Violation form submission
+        document.getElementById('violationForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const submitText = document.getElementById('submitText');
+            const submitLoading = document.getElementById('submitLoading');
+            
+            // Show loading
+            submitBtn.disabled = true;
+            submitText.textContent = 'Menyimpan...';
+            submitLoading.classList.remove('hidden');
+            
+            const studentClass = document.getElementById('studentClass').value;
+            const studentName = document.getElementById('studentName').value;
+            const violationType = document.getElementById('violationType').value;
+            const description = document.getElementById('description').value;
+            
+            const [violationCode, points] = violationType.split('-');
+            const violationText = document.getElementById('violationType').selectedOptions[0].text;
+            
+            const violation = {
+                id: Date.now(),
+                timestamp: new Date().toLocaleString('id-ID'),
+                studentClass,
+                studentName,
+                violationType: violationText,
+                points: parseInt(points),
+                description,
+                teacher: currentUser.name,
+                date: new Date().toDateString()
+            };
+            
+            try {
+                const result = await saveViolation(violation);
+                
+                if (result.success) {
+                    violations.unshift(violation); // Add to beginning of array
+                    updateViolationHistory();
+                    updateDailyStats();
+                    
+                    // Show success message
+                    const successMsg = document.getElementById('successMessage');
+                    successMsg.classList.remove('hidden');
+                    setTimeout(() => successMsg.classList.add('hidden'), 3000);
+                    
+                    // Show notification based on save location
+                    if (result.source === 'database') {
+                        showNotification('Data berhasil disimpan ke database!');
+                    } else {
+                        showNotification('Data disimpan lokal (database offline)');
+                    }
+                    
+                    // Reset form
+                    this.reset();
+                } else {
+                    showNotification('Gagal menyimpan data', 'error');
+                }
+            } catch (error) {
+                console.error('Error saving violation:', error);
+                showNotification('Terjadi kesalahan saat menyimpan', 'error');
+            } finally {
+                // Hide loading
+                submitBtn.disabled = false;
+                submitText.textContent = 'Simpan Pelanggaran';
+                submitLoading.classList.add('hidden');
+            }
+        });
+
+        // Tab functionality
+        document.getElementById('dailyTab').addEventListener('click', function() {
+            switchTab('daily');
+        });
+
+        document.getElementById('weeklyTab').addEventListener('click', function() {
+            switchTab('weekly');
+            updateWeeklySummary();
+        });
+
+        function switchTab(tab) {
+            const dailyTab = document.getElementById('dailyTab');
+            const weeklyTab = document.getElementById('weeklyTab');
+            const dailyContent = document.getElementById('dailyContent');
+            const weeklyContent = document.getElementById('weeklyContent');
+
+            if (tab === 'daily') {
+                dailyTab.className = 'py-2 px-1 border-b-2 border-blue-500 font-medium text-sm text-blue-600';
+                weeklyTab.className = 'py-2 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300';
+                dailyContent.classList.remove('hidden');
+                weeklyContent.classList.add('hidden');
+            } else {
+                weeklyTab.className = 'py-2 px-1 border-b-2 border-blue-500 font-medium text-sm text-blue-600';
+                dailyTab.className = 'py-2 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300';
+                weeklyContent.classList.remove('hidden');
+                dailyContent.classList.add('hidden');
+            }
+        }
+
+        // Week selector change
+        document.getElementById('weekSelector').addEventListener('change', function() {
+            updateWeeklySummary();
+        });
+
+        // Get week string in YYYY-Www format
+        function getWeekString(date) {
+            const year = date.getFullYear();
+            const week = getWeekNumber(date);
+            return `${year}-W${week.toString().padStart(2, '0')}`;
+        }
+
+        // Get week number
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+
+        // Get week range from week string
+        function getWeekRange(weekString) {
+            const [year, week] = weekString.split('-W');
+            const jan1 = new Date(year, 0, 1);
+            const days = (parseInt(week) - 1) * 7;
+            const weekStart = new Date(jan1.getTime() + days * 24 * 60 * 60 * 1000);
+            
+            // Adjust to Monday
+            const dayOfWeek = weekStart.getDay();
+            const diff = weekStart.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            weekStart.setDate(diff);
+            
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 6);
+            
+            return { start: weekStart, end: weekEnd };
+        }
+
+        // Update weekly summary
+        function updateWeeklySummary() {
+            const weekString = document.getElementById('weekSelector').value;
+            if (!weekString) return;
+
+            const { start, end } = getWeekRange(weekString);
+            const weekViolations = violations.filter(v => {
+                const violationDate = new Date(v.timestamp);
+                return violationDate >= start && violationDate <= end;
+            });
+
+            // Calculate summary statistics
+            const totalViolationsCount = weekViolations.length;
+            const totalPointsSum = weekViolations.reduce((sum, v) => sum + v.points, 0);
+            const uniqueStudents = [...new Set(weekViolations.map(v => `${v.studentName}-${v.studentClass}`))];
+            const uniqueClasses = [...new Set(weekViolations.map(v => v.studentClass))];
+
+            document.getElementById('totalViolations').textContent = totalViolationsCount;
+            document.getElementById('totalPoints').textContent = totalPointsSum;
+            document.getElementById('totalStudents').textContent = uniqueStudents.length;
+            document.getElementById('totalClasses').textContent = uniqueClasses.length;
+
+            // Group by student
+            const studentSummary = {};
+            weekViolations.forEach(v => {
+                const key = `${v.studentName}-${v.studentClass}`;
+                if (!studentSummary[key]) {
+                    studentSummary[key] = {
+                        name: v.studentName,
+                        class: v.studentClass,
+                        violations: 0,
+                        points: 0
+                    };
+                }
+                studentSummary[key].violations++;
+                studentSummary[key].points += v.points;
+            });
+
+            // Update table
+            const tbody = document.getElementById('weeklySummary');
+            const students = Object.values(studentSummary);
+            
+            if (students.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">Tidak ada pelanggaran pada minggu ini</td></tr>';
+                return;
+            }
+
+            // Sort by points descending
+            students.sort((a, b) => b.points - a.points);
+
+            tbody.innerHTML = students.map(student => {
+                let status = 'Ringan';
+                let statusColor = 'text-green-600 bg-green-100';
+                
+                if (student.points >= 100) {
+                    status = 'Sangat Berat';
+                    statusColor = 'text-red-600 bg-red-100';
+                } else if (student.points >= 50) {
+                    status = 'Berat';
+                    statusColor = 'text-orange-600 bg-orange-100';
+                } else if (student.points >= 25) {
+                    status = 'Sedang';
+                    statusColor = 'text-yellow-600 bg-yellow-100';
+                }
+
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 text-sm font-medium text-gray-900">${student.name}</td>
+                        <td class="px-4 py-3 text-sm text-gray-900">${student.class}</td>
+                        <td class="px-4 py-3 text-sm text-gray-900">${student.violations}</td>
+                        <td class="px-4 py-3 text-sm font-semibold ${student.points >= 75 ? 'text-red-600' : student.points >= 50 ? 'text-orange-600' : 'text-yellow-600'}">${student.points}</td>
+                        <td class="px-4 py-3 text-sm">
+                            <span class="px-2 py-1 rounded-full text-xs font-medium ${statusColor}">
+                                ${status}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Download Excel functionality
+        document.getElementById('downloadExcel').addEventListener('click', function() {
+            const weekString = document.getElementById('weekSelector').value;
+            if (!weekString) {
+                showNotification('Pilih minggu terlebih dahulu', 'error');
+                return;
+            }
+
+            const { start, end } = getWeekRange(weekString);
+            const weekViolations = violations.filter(v => {
+                const violationDate = new Date(v.timestamp);
+                return violationDate >= start && violationDate <= end;
+            });
+
+            if (weekViolations.length === 0) {
+                showNotification('Tidak ada data pelanggaran untuk minggu ini', 'error');
+                return;
+            }
+
+            // Create CSV content
+            let csvContent = 'Nama Siswa,Kelas,Tanggal,Waktu,Jenis Pelanggaran,Poin,Guru\n';
+            
+            weekViolations.forEach(v => {
+                const date = new Date(v.timestamp).toLocaleDateString('id-ID');
+                const time = new Date(v.timestamp).toLocaleTimeString('id-ID');
+                csvContent += `"${v.studentName}","${v.studentClass}","${date}","${time}","${v.violationType}","${v.points}","${v.teacher}"\n`;
+            });
+
+            // Add summary
+            csvContent += '\n\nREKAP MINGGUAN\n';
+            csvContent += 'Nama Siswa,Kelas,Total Pelanggaran,Total Poin,Status\n';
+
+            const studentSummary = {};
+            weekViolations.forEach(v => {
+                const key = `${v.studentName}-${v.studentClass}`;
+                if (!studentSummary[key]) {
+                    studentSummary[key] = {
+                        name: v.studentName,
+                        class: v.studentClass,
+                        violations: 0,
+                        points: 0
+                    };
+                }
+                studentSummary[key].violations++;
+                studentSummary[key].points += v.points;
+            });
+
+            Object.values(studentSummary).forEach(student => {
+                let status = 'Ringan';
+                if (student.points >= 100) status = 'Sangat Berat';
+                else if (student.points >= 50) status = 'Berat';
+                else if (student.points >= 25) status = 'Sedang';
+
+                csvContent += `"${student.name}","${student.class}","${student.violations}","${student.points}","${status}"\n`;
+            });
+
+            showExportModal(csvContent, 'Rekap Mingguan');
+        });
+
+        // Update violation history table
+        function updateViolationHistory() {
+            const tbody = document.getElementById('violationHistory');
+            const todayViolations = violations.filter(v => v.date === new Date().toDateString());
+            
+            if (todayViolations.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Belum ada data pelanggaran hari ini</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = todayViolations.map(violation => `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm text-gray-900">${violation.timestamp}</td>
+                    <td class="px-4 py-3 text-sm text-gray-900">${violation.studentClass}</td>
+                    <td class="px-4 py-3 text-sm font-medium text-gray-900">${violation.studentName}</td>
+                    <td class="px-4 py-3 text-sm text-gray-900">${violation.violationType}</td>
+                    <td class="px-4 py-3 text-sm font-semibold ${violation.points >= 75 ? 'text-red-600' : violation.points >= 50 ? 'text-orange-600' : 'text-yellow-600'}">${violation.points}</td>
+                    <td class="px-4 py-3 text-sm text-gray-900">${violation.teacher}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            initSupabase();
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'987cd674f4c140bb',t:'MTc1OTMzMDkxMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
